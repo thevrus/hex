@@ -180,6 +180,7 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-actions", "Window/Meetings/Actions menu"),
     ("meetings-rename", "Window/Meetings/Rename"),
     ("meetings-delete", "Window/Meetings/Delete"),
+    ("meetings-playback", "Window/Meetings/Play audio"),
     ("meetings-select", "Window/Meetings/Select lines"),
     (
         "meetings-select-confirm",

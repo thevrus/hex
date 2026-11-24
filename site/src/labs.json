@@ -638,6 +638,19 @@
       "title": "Delete transcript lines"
     },
     {
+      "added": "2026-11-23",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meeting-playback",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Listen to a saved meeting while its transcript follows along. Click a line to hear it, or export the audio beside the Markdown",
+      "title": "Play meeting audio"
+    },
+    {
       "added": "2026-11-07",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",

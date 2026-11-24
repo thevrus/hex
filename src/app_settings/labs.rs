@@ -253,6 +253,9 @@ pub struct LabsSettings {
     pub meeting_import: bool,
     /// A saved meeting's transcript offers line selection and deletion.
     pub transcript_edits: bool,
+    /// A saved meeting's audio plays in its detail, its transcript follows
+    /// along, and it can be exported beside the Markdown.
+    pub meeting_playback: bool,
     /// Meetings stops an offered or by-hand call recording (and a calendar
     /// reminder's on macOS) 30 s after its call app leaves the microphone, as
     /// Always record's Stop when the call ends does.
@@ -583,6 +586,7 @@ impl Default for LabsSettings {
             copy_capture_zip: false,
             meeting_import: false,
             transcript_edits: false,
+            meeting_playback: false,
             stop_any_call_recording: false,
             meeting_microphone_mute: false,
             meeting_indicator_display: false,

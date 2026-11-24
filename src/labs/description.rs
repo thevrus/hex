@@ -168,6 +168,9 @@ impl Feature {
             Self::MeetingImport => {
                 "Add an audio file to Meetings and turn it into text on this Mac"
             }
+            Self::MeetingPlayback => {
+                "Play a saved meeting's audio in its detail with the spoken line highlighted; clicking a line plays from it, and Export audio writes a WAV beside the Markdown file"
+            }
             Self::TranscriptEdits => {
                 "Select lines in a saved meeting transcript and delete them; summaries, copies, and the Markdown file use what's left"
             }

@@ -1488,6 +1488,49 @@ Proof limits: the decoder now has macOS-only unit tests through
 picker is not exercised headlessly, and quitting at each mid-import moment is
 reasoned from the shared cleanup scope and `final.pending` rather than observed.
 
+### Play Meeting Audio (Labs)
+
+```ts
+Meetings > a finished meeting (Labs › Play meeting audio, off by default) // labs.meeting_playback
+├── Offered only for a Complete or Interrupted meeting whose tracks are still kept
+│   (manifest audio_removed_at_ms unset, any samples): Keep audio expiry hides it
+│   └── Labs off or managed -> no player, no pressable lines, no Export audio
+├── Player under the title: Play/Pause, elapsed, a scrubber, the length
+│   ├── The first Play makes the worker (meeting::playback::Playback); it reads both
+│   │   tracks' headers, and opens the default output device only then (rodio)
+│   ├── Mix streams microphone.wav + system.wav from disk (an imported meeting has
+│   │   only system.wav), resamples one onto the faster rate linearly, sums them under
+│   │   a soft limiter (knee 0.8); nothing is decoded whole
+│   ├── Scrubbing shows the time while dragged and seeks on release; it keeps playing
+│   │   only if it was
+│   └── The end returns to Play; the next Play starts over
+├── Transcript while offered: every turn is one button ("Play from here", pointer cursor)
+│   that seeks to its start and plays; once this meeting was played, every turn but the
+│   one started last before the position dims (muted text, faint speaker), and while it
+│   plays the pane redraws every 100 ms and centres each newly playing turn once
+├── Ends playback (drops the worker, which stops the sound and closes the device):
+│   another meeting, another pane or Labs, Meetings › Settings, the window hidden,
+│   an armed Delete (Windows can't trash a folder with open files), or the lab off
+└── ⋯ > Export audio (only while the exported Markdown exists)
+    ├── Writes the mix as 16-bit mono WAV at the faster track's rate (16 kHz today,
+    │   about 115 MB an hour) beside the Markdown, named after it (`<stem>.wav`, then
+    │   `<stem> 2.wav`), through `.<stem>.wav.partial` + fsync + a hard link that never
+    │   replaces a file, on its own thread; one export at a time
+    ├── Done -> reveals the WAV (selected beside the .md); failed -> "Audio could not
+    │   be exported." under the player with the reason
+    └── The exported WAV is the user's copy: Delete, rename, and retention leave it
+```
+
+Checks: `both_sides_play_as_one_track_at_the_faster_rate`,
+`an_imported_meeting_plays_its_one_track`, `a_meeting_without_tracks_is_gone`,
+`seeking_lands_on_the_frame_at_that_time`, `loud_double_talk_bends_under_full_scale`,
+`export_lands_beside_the_markdown_and_never_overwrites` (meeting/playback.rs),
+`the_playing_line_is_the_last_one_started`,
+`the_player_clock_grows_hours_only_when_needed` (rune_ui/meetings/player.rs), and the
+`meetings-playback` scene. Not covered: sound reaching a real output device, the
+scrubber and line presses with a real pointer, and the follow scroll; no golden.
+Speed control is left out: rodio's speed also shifts the pitch.
+
 ### Delete Transcript Lines (Labs)
 
 ```ts

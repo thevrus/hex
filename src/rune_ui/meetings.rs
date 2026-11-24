@@ -29,6 +29,7 @@ use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 
 mod fixture;
+mod player;
 mod selection;
 
 pub(super) static MORE_ICON: rune::Icon = rune::Icon {
@@ -122,6 +123,8 @@ pub(super) struct Meeting {
     /// How long it is kept once finished, as `MeetingRetention::label`;
     /// `None` when it is kept for good.
     pub(super) kept_for: Option<&'static str>,
+    /// Its audio tracks are still kept (Labs › Play meeting audio).
+    pub(super) audio: bool,
 }
 
 impl Meeting {
@@ -200,6 +203,8 @@ pub(super) struct MeetingsPane {
     pub(super) delete_armed: Option<String>,
     /// The selected transcript lines (Labs › Delete transcript lines).
     pub(super) selection: selection::Selection,
+    /// The meeting playing, and Export audio (Labs › Play meeting audio).
+    pub(super) audio: player::Audio,
     action_error: Option<String>,
     /// The last transcript edit that failed.
     pub(super) edit_error: Option<String>,
@@ -582,9 +587,14 @@ fn choose_import(ui: &mut Ui) {
     ));
 }
 
+/// Before each frame: the import dialog's answer and the player.
+pub(super) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
+    poll_import(ui) | player::poll(ui, tx)
+}
+
 /// The audio file dialog's answer: a chosen file is imported where meetings
 /// are carried out. True when the answer changed what the pane shows.
-pub(super) fn poll_import(ui: &mut Ui) -> bool {
+fn poll_import(ui: &mut Ui) -> bool {
     let Some(choice) = ui.meetings.import_chooser.as_ref().and_then(Pending::poll) else {
         return false;
     };
@@ -1085,6 +1095,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .child(ld::card_header(title, meta, actions))
         .children(retention)
         .children(confirm)
+        .children(player::offered(ui, meeting).then(|| player::bar(ui, p, meeting)))
         .child(ld::card_scroll_sticky(
             p,
             "meeting-transcript",
@@ -1210,6 +1221,22 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
             );
             items += 1;
         }
+        if let crate::meeting::RevealTarget::Markdown(markdown) = &meeting.reveal
+            && player::offered(ui, meeting)
+        {
+            menu = if player::exporting(ui) {
+                menu.item(MenuItem::new(tr("Exporting audio…")).disabled(true))
+            } else {
+                let (id, markdown) = (meeting.id.clone(), markdown.clone());
+                menu.item(
+                    MenuItem::new(tr("Export audio")).on_select(move |ui: &mut Ui| {
+                        ui.open = None;
+                        player::export(ui, id.clone(), markdown.clone());
+                    }),
+                )
+            };
+            items += 1;
+        }
         let folder = meeting.folder.clone();
         menu = menu.item(
             MenuItem::new(tr("Reveal files")).on_select(move |ui: &mut Ui| {
@@ -1299,8 +1326,15 @@ fn transcript(ui: &Ui, p: Paint, meeting: &Meeting, stop_pending: bool, selectin
         });
     }
     let mut lines = col().key("turns").gap(14.0);
+    let playable = !selecting && player::offered(ui, meeting);
+    let now = player::highlighted(ui, meeting);
     for (index, turn) in turns.iter().enumerate() {
-        if selecting {
+        if playable {
+            // Once played, every turn but the one playing recedes.
+            let dim = now.is_some_and(|now| now != index);
+            let body = turn_line(p, index, turn, meeting.imported, dim);
+            lines = lines.child(player::turn_row(&meeting.id, index, turn, body));
+        } else if selecting {
             lines = lines.child(selection::turn_row(
                 p,
                 index,
@@ -1309,7 +1343,7 @@ fn transcript(ui: &Ui, p: Paint, meeting: &Meeting, stop_pending: bool, selectin
                 ui.meetings.selection.contains(turn),
             ));
         } else {
-            lines = lines.children(turn_line(p, index, turn, meeting.imported));
+            lines = lines.children(turn_line(p, index, turn, meeting.imported, false));
         }
     }
     if meeting.status == Status::Recording && !stop_pending {
@@ -1325,7 +1359,8 @@ fn transcript(ui: &Ui, p: Paint, meeting: &Meeting, stop_pending: bool, selectin
 
 /// One turn of a transcript: the pause before it, if any, then the speaker,
 /// the time, and the words. An imported meeting has one track: Speaker.
-pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> Vec<El> {
+/// `dim` recedes it behind the turn playing (Labs › Play meeting audio).
+pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool, dim: bool) -> Vec<El> {
     let mut els = Vec::new();
     if let Some(pause) = turn.pause_before_ms {
         els.push(
@@ -1353,7 +1388,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> 
                         })
                         .key("name")
                         .font(p.k.ty.small_medium)
-                        .color(p.muted()),
+                        .color(if dim { p.faint() } else { p.muted() }),
                     )
                     .child(
                         text(crate::meeting::format_duration(turn.start_ms))
@@ -1366,7 +1401,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> 
                 text(turn.text.clone())
                     .key("text")
                     .font(p.k.ty.body)
-                    .color(p.text())
+                    .color(if dim { p.muted() } else { p.text() })
                     .wrap(),
             ),
     );

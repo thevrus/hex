@@ -84,6 +84,7 @@ impl MeetingsPane {
                 chapters: Vec::new(),
                 imported: false,
                 kept_for: Some("24 hours"),
+                audio: false,
             };
         let mut live = meeting(
             "preview-live",

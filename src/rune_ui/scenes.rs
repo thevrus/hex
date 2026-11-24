@@ -726,6 +726,17 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.delete_armed = Some("preview-notes".into());
         ui.pane = Pane::Meetings;
     }),
+    // Labs › Play meeting audio: the meeting with notes playing 10 s in,
+    // its spoken line highlighted.
+    ("meetings-playback", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.meeting_playback = true;
+        for meeting in &mut ui.meetings.meetings {
+            meeting.audio = true;
+        }
+        ui.meetings.audio.preview = Some((10_500, true));
+        ui.pane = Pane::Meetings;
+    }),
     // Labs › Delete transcript lines: two saved turns checked, the bar
     // asking, then its one confirmation.
     ("meetings-select", |ui| {

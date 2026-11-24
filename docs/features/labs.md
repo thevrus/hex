@@ -284,6 +284,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        entries too. The old summary, provisional title, and chapters go with them; Regenerate
 │                                        summary reads the edited file and the user Markdown copy is rewritten only while Hex still
 │                                        wrote it (see meetings.md)
+├── Play meeting audio no labs.meeting_playback (every OS) a finished meeting with its tracks kept gets a player
+│                                        under its title (play, time, scrubber), its transcript turns play from their start when
+│                                        pressed, the playing turn is highlighted and kept in view, and ⋯ › Export audio writes a
+│                                        16-bit WAV mix beside the Markdown and reveals it (see meetings.md)
 ├── Stop every call recording when the call ends no labs.stop_any_call_recording (every OS, with Meetings on) an
 │                                        offered, calendar (macOS; Zoom, Teams, or Slack link), or by-hand call recording
 │                                        stops 3 s after its call app leaves the microphone, then 30 s of grace, even with

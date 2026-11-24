@@ -190,6 +190,9 @@ fn pane_meeting(
         microphone_warning: manifest.microphone.warning,
         transcript,
         imported: manifest.imported,
+        audio: !meeting.status.is_active()
+            && manifest.audio_removed_at_ms.is_none()
+            && manifest.system.samples + manifest.microphone.samples > 0,
         // Sections come from the transcript lines, not the merged turns, as
         // the menu bar and `hex meetings show --chapter` read them.
         kept_for: (!meeting.status.is_active())

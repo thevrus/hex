@@ -730,6 +730,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
             rows.push(row(Feature::MeetingIndicatorDisplay, None));
         }
         rows.push(row(Feature::TranscriptEdits, None));
+        rows.push(row(Feature::MeetingPlayback, None));
     }
     rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
     // macOS's menu-bar menu offers it, right under Speech Model.
@@ -1106,6 +1107,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::DictateWhileAnnotating => "lab-dictate-while-annotating",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::TranscriptEdits => "lab-transcript-edits",
+        Feature::MeetingPlayback => "lab-meeting-playback",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::YoloMode => "lab-yolo-mode",
         Feature::ApiProcessing => "lab-api-processing",

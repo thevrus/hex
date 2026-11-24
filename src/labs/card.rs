@@ -66,6 +66,7 @@ impl Feature {
             Self::AnnotateReplay => "Annotate last 15 seconds",
             Self::MeetingImport => "Import audio",
             Self::TranscriptEdits => "Delete transcript lines",
+            Self::MeetingPlayback => "Play meeting audio",
             Self::CapsLockDictation => "Caps Lock dictation",
             Self::OpenCodeInWsl => "OpenCode in WSL",
             Self::ApiProcessing => "Process API transcripts",
@@ -262,6 +263,9 @@ impl Feature {
             }
             Self::TranscriptEdits => {
                 "Select lines in a saved meeting transcript and delete them. Summaries, copies, and the Markdown file use what's left"
+            }
+            Self::MeetingPlayback => {
+                "Listen to a saved meeting while its transcript follows along. Click a line to hear it, or export the audio beside the Markdown"
             }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start dictating and again to finish. Hex keeps Caps Lock off and uses its light while it records and writes the text"

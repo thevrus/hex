@@ -64,6 +64,7 @@ mod markdown;
 pub(crate) mod mcp;
 mod notes;
 mod notes_file;
+pub(crate) mod playback;
 pub mod query;
 mod recording;
 mod recovery;

@@ -692,6 +692,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
     ),
     key(
+        "labs.meeting_playback",
+        Kind::Bool,
+        "Labs: a saved meeting's detail plays its audio with the transcript following along, and offers Export audio beside the Markdown",
+    ),
+    key(
         "labs.transcript_edits",
         Kind::Bool,
         "Labs: a saved meeting's transcript offers selecting lines and deleting them, and later summaries, copies, search, and the Markdown file use what's left",

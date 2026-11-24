@@ -251,7 +251,7 @@ pub(super) fn turn_row(p: Paint, index: usize, turn: &Turn, imported: bool, sele
         .gap(0.0)
         .grow(1.0)
         .shrink()
-        .children(super::turn_line(p, index, turn, imported));
+        .children(super::turn_line(p, index, turn, imported, false));
     let mut line = row()
         .key(format!("select-turn{index}"))
         .role("checkbox")
