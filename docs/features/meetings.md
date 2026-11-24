@@ -1527,7 +1527,7 @@ Checks: `both_sides_play_as_one_track_at_the_faster_rate`,
 `export_lands_beside_the_markdown_and_never_overwrites` (meeting/playback.rs),
 `the_playing_line_is_the_last_one_started` (rune_ui/meetings/player.rs), and the
 `meetings-playback` scene. Not covered: sound reaching a real output device, the
-scrubber and line presses with a real pointer, and the follow scroll; no golden.
+scrubber and line presses with a real pointer, and the follow scroll.
 Speed control is left out: rodio's speed also shifts the pitch.
 
 ### Delete Transcript Lines (Labs)
