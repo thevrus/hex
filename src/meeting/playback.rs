@@ -25,8 +25,6 @@ use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 
 /// How often a playing meeting publishes its position.
 const TICK: Duration = Duration::from_millis(30);
-/// How long an idle worker waits for a command before checking again.
-const IDLE: Duration = Duration::from_millis(500);
 
 const GONE: &str = "The recording is gone.";
 const UNREADABLE: &str = "The recording could not be read.";
@@ -94,7 +92,7 @@ impl Track {
     /// Moves to `seconds` from the start.
     fn seek(&mut self, seconds: f64) -> io::Result<()> {
         let position = (seconds * f64::from(self.rate)).clamp(0.0, self.frames as f64);
-        let base = (position.floor() as u64).min(self.frames);
+        let base = position.floor() as u64;
         self.reader.seek(u32::try_from(base).unwrap_or(u32::MAX))?;
         self.base = base;
         self.position = position;
@@ -130,16 +128,15 @@ impl Mix {
     /// The meeting in `folder`, from whichever tracks hold audio. An
     /// imported meeting has only `system.wav`.
     pub fn open(folder: &Path) -> Result<Self, &'static str> {
-        let present = ["microphone.wav", "system.wav"]
+        let files: Vec<PathBuf> = ["microphone.wav", "system.wav"]
             .iter()
-            .any(|file| folder.join(file).is_file());
-        if !present {
+            .map(|file| folder.join(file))
+            .filter(|file| file.is_file())
+            .collect();
+        if files.is_empty() {
             return Err(GONE);
         }
-        let mut tracks: Vec<Track> = ["microphone.wav", "system.wav"]
-            .iter()
-            .filter_map(|file| Track::open(&folder.join(file)))
-            .collect();
+        let mut tracks: Vec<Track> = files.iter().filter_map(|file| Track::open(file)).collect();
         let rate = tracks.iter().map(|track| track.rate).max().unwrap_or(0);
         let rate = NonZeroU32::new(rate).ok_or(UNREADABLE)?;
         for track in &mut tracks {
@@ -317,8 +314,9 @@ struct Output {
 
 /// The worker: takes commands until the pane drops its [`Playback`].
 fn run(folder: &Path, shared: &Shared, commands: &Receiver<Command>, wake: &dyn Fn()) {
-    let duration = match Mix::open(folder) {
-        Ok(mix) => mix.duration(),
+    // The tracks opened for their length serve the first Play.
+    let mut opened = match Mix::open(folder) {
+        Ok(mix) => Some(mix),
         Err(error) => {
             *lock(&shared.error) = Some(error);
             shared.playing.store(false, Ordering::Release);
@@ -326,6 +324,7 @@ fn run(folder: &Path, shared: &Shared, commands: &Receiver<Command>, wake: &dyn 
             return;
         }
     };
+    let duration = opened.as_ref().map_or(Duration::ZERO, Mix::duration);
     shared
         .duration_ms
         .store(millis(duration).max(1), Ordering::Release);
@@ -340,12 +339,18 @@ fn run(folder: &Path, shared: &Shared, commands: &Receiver<Command>, wake: &dyn 
         let sounding = output
             .as_ref()
             .is_some_and(|output| !output.player.is_paused() && !output.player.empty());
-        match commands.recv_timeout(if sounding { TICK } else { IDLE }) {
+        // Paused or finished, nothing changes until the pane asks.
+        let command = if sounding {
+            commands.recv_timeout(TICK)
+        } else {
+            commands.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        };
+        match command {
             Ok(Command::Play) => {
                 if position >= duration {
                     position = Duration::ZERO;
                 }
-                match start(folder, &mut output, position) {
+                match start(folder, &mut output, opened.take(), position) {
                     Ok(()) => {
                         started = true;
                         shared.playing.store(true, Ordering::Release);
@@ -401,37 +406,44 @@ fn run(folder: &Path, shared: &Shared, commands: &Receiver<Command>, wake: &dyn 
 
 /// Opens the device on the first Play, queues the meeting from `from` when
 /// nothing is queued, and plays.
-fn start(folder: &Path, output: &mut Option<Output>, from: Duration) -> Result<(), &'static str> {
-    if output.is_none() {
-        let mut sink =
-            DeviceSinkBuilder::open_default_sink().map_err(|_| "No audio output is available.")?;
-        sink.log_on_drop(false);
-        let player = Player::connect_new(sink.mixer());
-        *output = Some(Output {
-            _sink: sink,
-            player,
-        });
-    }
-    let Some(output) = output.as_ref() else {
-        return Err("Playback stopped.");
+fn start(
+    folder: &Path,
+    output: &mut Option<Output>,
+    opened: Option<Mix>,
+    from: Duration,
+) -> Result<(), &'static str> {
+    let output = match output {
+        Some(output) => output,
+        None => {
+            let mut sink = DeviceSinkBuilder::open_default_sink()
+                .map_err(|_| "No audio output is available.")?;
+            sink.log_on_drop(false);
+            let player = Player::connect_new(sink.mixer());
+            output.insert(Output {
+                _sink: sink,
+                player,
+            })
+        }
     };
     if output.player.empty() {
-        let mut mix = Mix::open(folder)?;
+        let mut mix = match opened {
+            Some(mix) => mix,
+            None => Mix::open(folder)?,
+        };
         mix.seek(from).map_err(|_| UNREADABLE)?;
         // Queued paused, so nothing sounds before the player's position is
         // set to where the source already is (it counts from its source).
         output.player.pause();
         output.player.append(mix);
         let _ = output.player.try_seek(from);
-        output.player.play();
-    } else {
-        output.player.play();
     }
+    output.player.play();
     Ok(())
 }
 
 /// Writes the meeting's mixed audio as 16-bit WAV beside `markdown`, named
-/// after it (`Design sync.wav`, then `Design sync 2.wav`, never over a file
+/// after it (`Design sync.wav`, then `Design sync (2).wav`, as the Markdown
+/// and notes files are, never over a file
 /// that exists), and returns its path. Blocks; run it off the UI thread.
 pub fn export_beside(folder: &Path, markdown: &Path) -> Result<PathBuf, String> {
     let mut mix = Mix::open(folder).map_err(str::to_string)?;
@@ -467,7 +479,7 @@ pub fn export_beside(folder: &Path, markdown: &Path) -> Result<PathBuf, String> 
 }
 
 /// Links the finished `partial` in as the first free `<stem>.wav`,
-/// `<stem> 2.wav`, …: a hard link fails rather than replace a file that
+/// `<stem> (2).wav`, …: a hard link fails rather than replace a file that
 /// appeared meanwhile. A volume without hard links gets a rename to a name
 /// that was free a moment before.
 fn place(partial: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
@@ -475,7 +487,7 @@ fn place(partial: &Path, directory: &Path, stem: &str) -> io::Result<PathBuf> {
         let target = directory.join(if n == 1 {
             format!("{stem}.wav")
         } else {
-            format!("{stem} {n}.wav")
+            format!("{stem} ({n}).wav")
         });
         match std::fs::hard_link(partial, &target) {
             Ok(()) => return Ok(target),
@@ -596,7 +608,10 @@ mod tests {
         let frames = reader.duration();
         let _ = std::fs::remove_dir_all(&folder);
         assert_eq!(first.file_name().unwrap(), "2026-11-23 Design sync.wav");
-        assert_eq!(second.file_name().unwrap(), "2026-11-23 Design sync 2.wav");
+        assert_eq!(
+            second.file_name().unwrap(),
+            "2026-11-23 Design sync (2).wav"
+        );
         assert_eq!((spec.bits_per_sample, spec.sample_rate), (16, 16_000));
         assert_eq!(frames, 160);
     }

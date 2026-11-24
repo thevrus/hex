@@ -1514,7 +1514,7 @@ Meetings > a finished meeting (Labs › Play meeting audio, off by default) // l
 └── ⋯ > Export audio (only while the exported Markdown exists)
     ├── Writes the mix as 16-bit mono WAV at the faster track's rate (16 kHz today,
     │   about 115 MB an hour) beside the Markdown, named after it (`<stem>.wav`, then
-    │   `<stem> 2.wav`), through `.<stem>.wav.partial` + fsync + a hard link that never
+    │   `<stem> (2).wav`), through `.<stem>.wav.partial` + fsync + a hard link that never
     │   replaces a file, on its own thread; one export at a time
     ├── Done -> reveals the WAV (selected beside the .md); failed -> "Audio could not
     │   be exported." under the player with the reason

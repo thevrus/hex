@@ -16,7 +16,7 @@ use rune::{Drag, El, Key, KeyEvent, Phase, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::super::controls::{PAUSE, PLAY, Paint};
-use super::super::lists::{Tone, error_panel};
+use super::super::lists::dismissible_error_panel;
 use super::super::{Pane, Ui};
 use super::{Meeting, Status, Turn, View};
 use crate::desktop::i18n::{tr, tr_fill};
@@ -27,9 +27,9 @@ const FRAME: Duration = Duration::from_millis(100);
 /// The transcript scroll the highlight keeps the playing line inside.
 const TRANSCRIPT: &str = "meeting-transcript";
 /// How far the skip buttons move.
-const SKIP_MS: u64 = 15_000;
+const SKIP_MS: i64 = 15_000;
 /// How far an arrow key moves the focused scrubber.
-const NUDGE_MS: u64 = 5_000;
+const NUDGE_MS: i64 = 5_000;
 
 static BACK: rune::Icon = rune::Icon {
     name: "hex-back-15",
@@ -55,11 +55,23 @@ pub(in crate::rune_ui) struct Audio {
     pub(in crate::rune_ui) preview: Option<(u64, bool)>,
 }
 
-/// Export audio for one meeting: running, or how it ended.
+impl Audio {
+    /// The player, if it is `id`'s.
+    fn of(&self, id: &str) -> Option<&Playback> {
+        self.playback.as_ref().filter(|playback| playback.id == id)
+    }
+}
+
+/// Export audio for one meeting: running, or why it failed. A finished
+/// export clears it.
 struct Export {
     id: String,
-    worker: Option<Receiver<Result<PathBuf, String>>>,
-    error: Option<String>,
+    state: ExportState,
+}
+
+enum ExportState {
+    Running(Receiver<Result<PathBuf, String>>),
+    Failed(String),
 }
 
 /// Whether `meeting`'s audio can play: the lab is on and it is a finished
@@ -78,11 +90,7 @@ fn state(ui: &Ui, meeting: &Meeting) -> (u64, u64, bool) {
     if let Some((position, playing)) = audio.preview {
         return (position, meeting.duration_ms, playing);
     }
-    match audio
-        .playback
-        .as_ref()
-        .filter(|playback| playback.id == meeting.id)
-    {
+    match audio.of(&meeting.id) {
         Some(playback) => (
             playback.position_ms(),
             playback.duration_ms().unwrap_or(meeting.duration_ms),
@@ -101,11 +109,7 @@ fn playing_turn(turns: &[Turn], position: u64) -> Option<usize> {
 /// scrubbed, so an untouched transcript reads as it always has.
 pub(super) fn highlighted(ui: &Ui, meeting: &Meeting) -> Option<usize> {
     let audio = &ui.meetings.audio;
-    let touched = audio.preview.is_some()
-        || audio
-            .playback
-            .as_ref()
-            .is_some_and(|playback| playback.id == meeting.id);
+    let touched = audio.preview.is_some() || audio.of(&meeting.id).is_some();
     if !touched {
         return None;
     }
@@ -117,11 +121,7 @@ pub(super) fn highlighted(ui: &Ui, meeting: &Meeting) -> Option<usize> {
 fn player<'a>(ui: &'a mut Ui, id: &str) -> Option<&'a Playback> {
     let folder = ui.meetings.meeting(id)?.folder.clone();
     let audio = &mut ui.meetings.audio;
-    if audio
-        .playback
-        .as_ref()
-        .is_none_or(|playback| playback.id != id)
-    {
+    if audio.of(id).is_none() {
         let waker = ui.modes.waker.clone();
         audio.followed = None;
         audio.playback = Some(Playback::new(id.to_string(), folder, move || {
@@ -164,55 +164,40 @@ fn skip(ui: &mut Ui, id: &str, delta: i64) {
     play_from(ui, id, at, playing);
 }
 
-/// `1:05:09`, `4:07`, or `0:03`: a player's clock.
-fn clock(ms: u64) -> String {
-    let seconds = ms / 1_000;
-    let (hours, minutes, seconds) = (seconds / 3_600, seconds / 60 % 60, seconds % 60);
-    if hours > 0 {
-        format!("{hours}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes}:{seconds:02}")
-    }
-}
-
 /// The bar under the title: play, the time, the scrubber, and the length,
 /// then why it could not play, if it couldn't.
 pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
     let (position, duration, playing) = state(ui, meeting);
     let audio = &ui.meetings.audio;
     let shown = audio.scrub.unwrap_or(position).min(duration);
-    let progress = if duration == 0 {
-        0.0
-    } else {
-        shown as f32 / duration as f32
-    };
-    let id = meeting.id.clone();
-    let button = IconButton::new(if playing { &PAUSE } else { &PLAY })
-        .variant(IconButtonVariant::Ghost)
-        .control_size(ControlSize::Small)
-        .label(if playing { tr("Pause") } else { tr("Play") })
-        .on_press(move |ui: &mut Ui| toggle(ui, &id))
-        .build(p.k)
-        .key("meeting-play");
-    let jump = |icon: &'static rune::Icon, label: &str, key: &str, delta: i64| {
+    let button = |icon: &'static rune::Icon, label: &str, key: &str, press: fn(&mut Ui, &str)| {
         let id = meeting.id.clone();
         IconButton::new(icon)
             .variant(IconButtonVariant::Ghost)
             .control_size(ControlSize::Small)
             .label(tr(label))
-            .on_press(move |ui: &mut Ui| skip(ui, &id, delta))
+            .on_press(move |ui: &mut Ui| press(ui, &id))
             .build(p.k)
             .key(key)
     };
-    let back = jump(&BACK, "Back 15 seconds", "meeting-back", -(SKIP_MS as i64));
-    let forward = jump(
+    let back = button(&BACK, "Back 15 seconds", "meeting-back", |ui, id| {
+        skip(ui, id, -SKIP_MS);
+    });
+    let play = if playing {
+        button(&PAUSE, "Pause", "meeting-play", toggle)
+    } else {
+        button(&PLAY, "Play", "meeting-play", toggle)
+    };
+    let forward = button(
         &FORWARD,
         "Forward 15 seconds",
         "meeting-forward",
-        SKIP_MS as i64,
+        |ui, id| {
+            skip(ui, id, SKIP_MS);
+        },
     );
     let time = |key: &str, ms: u64| {
-        text(clock(ms))
+        text(crate::meeting::format_duration(ms))
             .key(key)
             .font(p.k.ty.mono)
             .color(p.faint())
@@ -230,26 +215,20 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
                     .gap(2.0)
                     .center_y()
                     .child(back)
-                    .child(button)
+                    .child(play)
                     .child(forward),
             )
             .child(time("elapsed", shown))
             .child(scrubber(
                 p,
                 &meeting.id,
-                progress,
                 duration,
                 shown,
                 audio.scrub.is_some(),
             ))
             .child(time("length", duration)),
     );
-    let error = audio
-        .playback
-        .as_ref()
-        .filter(|playback| playback.id == meeting.id)
-        .and_then(Playback::error);
-    if let Some(error) = error {
+    if let Some(error) = audio.of(&meeting.id).and_then(Playback::error) {
         player = player.child(
             text(tr_fill("Could not play: {}", tr(error)))
                 .key("play-error")
@@ -258,18 +237,20 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
                 .wrap(),
         );
     }
-    if let Some(error) = audio
+    if let Some(Export {
+        state: ExportState::Failed(error),
+        ..
+    }) = audio
         .export
         .as_ref()
         .filter(|export| export.id == meeting.id)
-        .and_then(|export| export.error.as_deref())
     {
-        player = player.child(error_panel(
+        player = player.child(dismissible_error_panel(
             p,
             "export-audio-error",
             tr("Audio could not be exported."),
             tr(error),
-            Tone::Danger,
+            |ui: &mut Ui| ui.meetings.audio.export = None,
         ));
     }
     player
@@ -279,9 +260,13 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
 /// pointer is over it or it is dragged. Pressing or dragging it moves the
 /// time; letting go plays from there if it was playing. Focused, the arrow
 /// keys move it five seconds.
-fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64, held: bool) -> El {
+fn scrubber(p: Paint, id: &str, duration: u64, shown: u64, held: bool) -> El {
     let c = &p.k.c;
-    let progress = progress.clamp(0.0, 1.0);
+    let progress = if duration == 0 {
+        0.0
+    } else {
+        (shown as f32 / duration as f32).clamp(0.0, 1.0)
+    };
     let drag_id = id.to_string();
     let key_id = id.to_string();
     let knob = if held { 1.0 } else { 0.0 };
@@ -290,7 +275,7 @@ fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64, held: 
         .role("slider")
         .label(tr("Audio position"))
         .range_value(f64::from(progress), 0.0, 1.0)
-        .a11y_value(clock(shown))
+        .a11y_value(crate::meeting::format_duration(shown))
         .grow(1.0)
         .shrink()
         .h(22.0)
@@ -300,8 +285,8 @@ fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64, held: 
         .focusable(true)
         .on_key(move |ui: &mut Ui, e: &KeyEvent, _: &mut Tx| {
             let delta = match e.key {
-                Key::Left => -(NUDGE_MS as i64),
-                Key::Right => NUDGE_MS as i64,
+                Key::Left => -NUDGE_MS,
+                Key::Right => NUDGE_MS,
                 _ => return false,
             };
             skip(ui, &key_id, delta);
@@ -319,9 +304,8 @@ fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64, held: 
                 let playing = ui
                     .meetings
                     .audio
-                    .playback
-                    .as_ref()
-                    .is_some_and(|playback| playback.id == drag_id && playback.playing());
+                    .of(&drag_id)
+                    .is_some_and(Playback::playing);
                 play_from(ui, &drag_id, ms, playing);
             } else {
                 ui.meetings.audio.scrub = Some(ms);
@@ -390,11 +374,11 @@ pub(super) fn export(ui: &mut Ui, id: String, markdown: PathBuf) {
                 waker();
             }
         });
-    ui.meetings.audio.export = Some(Export {
-        id,
-        error: started.as_ref().err().map(ToString::to_string),
-        worker: started.ok().map(|_| receiver),
-    });
+    let state = match started {
+        Ok(_) => ExportState::Running(receiver),
+        Err(error) => ExportState::Failed(error.to_string()),
+    };
+    ui.meetings.audio.export = Some(Export { id, state });
 }
 
 /// Whether an Export audio runs; one at a time, so its answer is never
@@ -404,7 +388,7 @@ pub(super) fn exporting(ui: &Ui) -> bool {
         .audio
         .export
         .as_ref()
-        .is_some_and(|export| export.worker.is_some())
+        .is_some_and(|export| matches!(export.state, ExportState::Running(_)))
 }
 
 /// Before each frame: ends playback that lost its meeting, takes Export
@@ -466,24 +450,31 @@ pub(super) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
 }
 
 fn poll_export(ui: &mut Ui) -> bool {
-    let Some(export) = ui.meetings.audio.export.as_mut() else {
+    let Some(Export {
+        state: ExportState::Running(worker),
+        ..
+    }) = ui.meetings.audio.export.as_mut()
+    else {
         return false;
     };
-    let result = match export.worker.as_ref().map(Receiver::try_recv) {
-        Some(Ok(result)) => result,
-        Some(Err(TryRecvError::Disconnected)) => Err(tr("Playback stopped.").to_string()),
-        Some(Err(TryRecvError::Empty)) | None => return false,
+    let result = match worker.try_recv() {
+        Ok(result) => result,
+        Err(TryRecvError::Disconnected) => Err(tr("Playback stopped.").to_string()),
+        Err(TryRecvError::Empty) => return false,
     };
-    export.worker = None;
     match result {
         Ok(path) => {
-            export.error = None;
+            ui.meetings.audio.export = None;
             super::ask(
                 ui,
                 super::MeetingRequest::Reveal(crate::meeting::RevealTarget::Markdown(path)),
             );
         }
-        Err(error) => export.error = Some(error),
+        Err(error) => {
+            if let Some(export) = ui.meetings.audio.export.as_mut() {
+                export.state = ExportState::Failed(error);
+            }
+        }
     }
     true
 }
@@ -509,12 +500,5 @@ mod tests {
         assert_eq!(playing_turn(&turns, 1_000), Some(0));
         assert_eq!(playing_turn(&turns, 8_999), Some(1));
         assert_eq!(playing_turn(&turns, 60_000), Some(2));
-    }
-
-    #[test]
-    fn the_player_clock_grows_hours_only_when_needed() {
-        assert_eq!(clock(3_400), "0:03");
-        assert_eq!(clock(247_000), "4:07");
-        assert_eq!(clock(3_909_000), "1:05:09");
     }
 }
