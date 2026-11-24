@@ -80,6 +80,15 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
 /// Hungarian, for the strings above.
 #[rustfmt::skip]
 pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Play meeting audio", "Megbeszélések hangjának lejátszása"),
+    ("Listen to a saved meeting while its transcript follows along. Click a line to hear it, or export the audio beside the Markdown", "Hallgasson meg egy mentett megbeszélést, miközben az átirat követi a lejátszást. Kattintson egy sorra a meghallgatásához, vagy exportálja a hangot a Markdown-fájl mellé"),
+    ("Play from here", "Lejátszás innen"),
+    ("Back 15 seconds", "Vissza 15 másodpercet"),
+    ("Forward 15 seconds", "Előre 15 másodpercet"),
+    ("Audio position", "Hang pozíciója"),
+    ("Export audio", "Hang exportálása"),
+    ("Exporting audio…", "Hang exportálása…"),
+    ("Audio could not be exported.", "A hangot nem sikerült exportálni."),
     ("Delete transcript lines", "Átirat sorainak törlése"),
     ("Select lines in a saved meeting transcript and delete them. Summaries, copies, and the Markdown file use what's left", "Jelöljön ki sorokat egy mentett megbeszélés átiratában, és törölje őket. Az összefoglalók, a másolatok és a Markdown-fájl a maradékot használják"),
     ("Select lines", "Sorok kijelölése"),
