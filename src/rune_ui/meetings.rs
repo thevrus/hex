@@ -1394,7 +1394,8 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool, dim
                         text(crate::meeting::format_duration(turn.start_ms))
                             .key("clock")
                             .font(p.k.ty.small)
-                            .color(p.faint()),
+                            .color(p.faint())
+                            .group_color(p.k.c.icon_accent),
                     ),
             )
             .child(
@@ -1402,6 +1403,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool, dim
                     .key("text")
                     .font(p.k.ty.body)
                     .color(if dim { p.muted() } else { p.text() })
+                    .group_color(p.text())
                     .wrap(),
             ),
     );

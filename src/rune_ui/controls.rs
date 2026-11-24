@@ -627,7 +627,16 @@ pub(super) fn segmented_tx(
         .build(p.k)
         .key(key)
         .role("segmented")
+        // The selected pill floats inside the track, clear of its edge and
+        // its neighbour, with corners concentric to the track's.
+        .h(28.0 + 2.0 * SEGMENT_INSET)
+        .padding(SEGMENT_INSET)
+        .gap(SEGMENT_INSET)
+        .radius(6.0 + SEGMENT_INSET)
 }
+
+/// The room between a [`segmented_tx`] track's edge and its segments.
+const SEGMENT_INSET: f32 = 2.0;
 
 /// The inset either side of a segment's label, as `SegmentedControl` pads it.
 const SEGMENT_PX: f32 = 12.0;

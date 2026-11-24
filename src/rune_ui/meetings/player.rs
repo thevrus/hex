@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::Duration;
 
-use rune::{Drag, El, Phase, Tx, col, el, row, text};
+use rune::{Drag, El, Key, KeyEvent, Phase, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use super::super::controls::{PAUSE, PLAY, Paint};
@@ -26,6 +26,22 @@ use crate::meeting::playback::Playback;
 const FRAME: Duration = Duration::from_millis(100);
 /// The transcript scroll the highlight keeps the playing line inside.
 const TRANSCRIPT: &str = "meeting-transcript";
+/// How far the skip buttons move.
+const SKIP_MS: u64 = 15_000;
+/// How far an arrow key moves the focused scrubber.
+const NUDGE_MS: u64 = 5_000;
+
+static BACK: rune::Icon = rune::Icon {
+    name: "hex-back-15",
+    view: 20.0,
+    body: r#"<path d="M10 3a7 7 0 1 1-6.4 4.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11.7 1.4 10 3l1.7 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.2 9.2 8 8.6v4.8M12.9 8.6h-2.3l-.3 2.1c.3-.2.7-.3 1-.3a1.5 1.5 0 0 1 0 3c-.6 0-1.1-.3-1.3-.7" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
+
+static FORWARD: rune::Icon = rune::Icon {
+    name: "hex-forward-15",
+    view: 20.0,
+    body: r#"<path d="M10 3a7 7 0 1 0 6.4 4.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8.3 1.4 10 3 8.3 4.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.2 9.2 8 8.6v4.8M12.9 8.6h-2.3l-.3 2.1c.3-.2.7-.3 1-.3a1.5 1.5 0 0 1 0 3c-.6 0-1.1-.3-1.3-.7" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
 
 #[derive(Default)]
 pub(in crate::rune_ui) struct Audio {
@@ -138,6 +154,16 @@ fn play_from(ui: &mut Ui, id: &str, ms: u64, play: bool) {
     ui.meetings.audio.followed = None;
 }
 
+/// Moves `id` by `delta` ms, keeping it playing if it was.
+fn skip(ui: &mut Ui, id: &str, delta: i64) {
+    let Some(meeting) = ui.meetings.meeting(id) else {
+        return;
+    };
+    let (position, duration, playing) = state(ui, meeting);
+    let at = position.saturating_add_signed(delta).min(duration);
+    play_from(ui, id, at, playing);
+}
+
 /// `1:05:09`, `4:07`, or `0:03`: a player's clock.
 fn clock(ms: u64) -> String {
     let seconds = ms / 1_000;
@@ -168,6 +194,23 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
         .on_press(move |ui: &mut Ui| toggle(ui, &id))
         .build(p.k)
         .key("meeting-play");
+    let jump = |icon: &'static rune::Icon, label: &str, key: &str, delta: i64| {
+        let id = meeting.id.clone();
+        IconButton::new(icon)
+            .variant(IconButtonVariant::Ghost)
+            .control_size(ControlSize::Small)
+            .label(tr(label))
+            .on_press(move |ui: &mut Ui| skip(ui, &id, delta))
+            .build(p.k)
+            .key(key)
+    };
+    let back = jump(&BACK, "Back 15 seconds", "meeting-back", -(SKIP_MS as i64));
+    let forward = jump(
+        &FORWARD,
+        "Forward 15 seconds",
+        "meeting-forward",
+        SKIP_MS as i64,
+    );
     let time = |key: &str, ms: u64| {
         text(clock(ms))
             .key(key)
@@ -181,9 +224,24 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
             .w_full()
             .gap(10.0)
             .center_y()
-            .child(button)
+            .child(
+                row()
+                    .key("transport")
+                    .gap(2.0)
+                    .center_y()
+                    .child(back)
+                    .child(button)
+                    .child(forward),
+            )
             .child(time("elapsed", shown))
-            .child(scrubber(p, &meeting.id, progress, duration, shown))
+            .child(scrubber(
+                p,
+                &meeting.id,
+                progress,
+                duration,
+                shown,
+                audio.scrub.is_some(),
+            ))
             .child(time("length", duration)),
     );
     let error = audio
@@ -217,12 +275,16 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
     player
 }
 
-/// A rail that fills as the meeting plays. Pressing or dragging it moves
-/// the time; letting go plays from there if it was playing.
-fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64) -> El {
+/// A rail that fills as the meeting plays, with a knob that shows while the
+/// pointer is over it or it is dragged. Pressing or dragging it moves the
+/// time; letting go plays from there if it was playing. Focused, the arrow
+/// keys move it five seconds.
+fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64, held: bool) -> El {
     let c = &p.k.c;
     let progress = progress.clamp(0.0, 1.0);
-    let id = id.to_string();
+    let drag_id = id.to_string();
+    let key_id = id.to_string();
+    let knob = if held { 1.0 } else { 0.0 };
     row()
         .key("scrubber")
         .role("slider")
@@ -233,6 +295,18 @@ fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64) -> El 
         .shrink()
         .h(22.0)
         .center_y()
+        .cursor(rune::Cursor::Pointer)
+        .hover_group()
+        .focusable(true)
+        .on_key(move |ui: &mut Ui, e: &KeyEvent, _: &mut Tx| {
+            let delta = match e.key {
+                Key::Left => -(NUDGE_MS as i64),
+                Key::Right => NUDGE_MS as i64,
+                _ => return false,
+            };
+            skip(ui, &key_id, delta);
+            true
+        })
         .on_drag(move |ui: &mut Ui, drag: &mut Drag, _: &mut Tx| {
             if drag.cancelled() {
                 ui.meetings.audio.scrub = None;
@@ -247,28 +321,36 @@ fn scrubber(p: Paint, id: &str, progress: f32, duration: u64, shown: u64) -> El 
                     .audio
                     .playback
                     .as_ref()
-                    .is_some_and(|playback| playback.id == id && playback.playing());
-                play_from(ui, &id, ms, playing);
+                    .is_some_and(|playback| playback.id == drag_id && playback.playing());
+                play_from(ui, &drag_id, ms, playing);
             } else {
                 ui.meetings.audio.scrub = Some(ms);
             }
         })
         .child(
-            row()
-                .key("rail")
-                .grow(1.0)
+            el().key("played")
+                .grow(progress.max(f32::EPSILON))
                 .h(4.0)
                 .radius(2.0)
-                .fill(c.layer_03)
-                .child(
-                    el().key("played")
-                        .grow(progress.max(f32::EPSILON))
-                        .h(4.0)
-                        .radius(2.0)
-                        .fill(c.icon_accent),
-                )
-                .child(el().key("left").grow((1.0 - progress).max(f32::EPSILON)))
+                .fill(c.icon_accent),
+        )
+        .child(
+            el().key("knob")
+                .w(12.0)
+                .h(12.0)
+                .mx(-6.0)
+                .radius(6.0)
+                .fill(c.icon_accent)
+                .group_opacity(knob, 1.0)
+                .paint_order(1)
                 .a11y_hidden(),
+        )
+        .child(
+            el().key("left")
+                .grow((1.0 - progress).max(f32::EPSILON))
+                .h(4.0)
+                .radius(2.0)
+                .fill(c.layer_03),
         )
 }
 
@@ -283,6 +365,7 @@ pub(super) fn turn_row(id: &str, index: usize, turn: &Turn, body: Vec<El>) -> El
         .label(tr("Play from here"))
         .description(turn.text.clone())
         .cursor(rune::Cursor::Pointer)
+        .hover_group()
         .children(body)
         .on_press(move |ui: &mut Ui| play_from(ui, &id, start, true))
 }
