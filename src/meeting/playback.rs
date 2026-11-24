@@ -263,9 +263,13 @@ impl Playback {
     }
 
     pub fn play(&self) {
-        *lock(&self.shared.error) = None;
+        let previous = lock(&self.shared.error).take();
         self.shared.playing.store(true, Ordering::Release);
-        let _ = self.commands.send(Command::Play);
+        if self.commands.send(Command::Play).is_err() {
+            // The worker already ended (no tracks, no thread): keep why.
+            self.shared.playing.store(false, Ordering::Release);
+            *lock(&self.shared.error) = previous.or(Some("Playback stopped."));
+        }
     }
 
     pub fn pause(&self) {

@@ -1525,8 +1525,7 @@ Checks: `both_sides_play_as_one_track_at_the_faster_rate`,
 `an_imported_meeting_plays_its_one_track`, `a_meeting_without_tracks_is_gone`,
 `seeking_lands_on_the_frame_at_that_time`, `loud_double_talk_bends_under_full_scale`,
 `export_lands_beside_the_markdown_and_never_overwrites` (meeting/playback.rs),
-`the_playing_line_is_the_last_one_started`,
-`the_player_clock_grows_hours_only_when_needed` (rune_ui/meetings/player.rs), and the
+`the_playing_line_is_the_last_one_started` (rune_ui/meetings/player.rs), and the
 `meetings-playback` scene. Not covered: sound reaching a real output device, the
 scrubber and line presses with a real pointer, and the follow scroll; no golden.
 Speed control is left out: rodio's speed also shifts the pitch.
